@@ -89,22 +89,33 @@ type model struct {
 
 type file struct {
 	name    string
-	content string
+	content []string
 	display string
 }
 
 func newFile(name, content string) *file {
 	f := &file{name: name}
-	f.update(content)
+	f.push(content)
 	return f
 }
 
-func (f *file) update(content string) {
-	f.content = content
+func (f *file) undo() {
+	if len(f.content) > 1 {
+		f.content = f.content[1:]
+	}
+	f.update()
+}
+
+func (f *file) push(content string) {
+	f.content = append([]string{content}, f.content...)
+	f.update()
+}
+
+func (f *file) update() {
 	var b bytes.Buffer
-	err := quick.Highlight(&b, content, filepath.Ext(f.name), "terminal16m", "solorized-dark")
+	err := quick.Highlight(&b, f.content[0], filepath.Ext(f.name), "terminal16m", "solorized-dark")
 	if err != nil {
-		f.display = content
+		f.display = f.content[0]
 	}
 	f.display = b.String()
 }
@@ -152,15 +163,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.message = err.Error()
 			}
-			m.file.update(response.Choices[0].Text)
+			m.file.push(response.Choices[0].Text)
 
 		case key.Matches(msg, m.keys.Save):
-			err := os.WriteFile(m.file.name, []byte(m.file.content), 0644)
+			content := strings.TrimSpace(m.file.content[0] + "\n")
+			err := os.WriteFile(m.file.name, []byte(content), 0644)
 			if err != nil {
 				m.message = err.Error()
 			} else {
 				m.message = "Saved"
 			}
+		case key.Matches(msg, m.keys.Undo):
+			m.file.undo()
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}

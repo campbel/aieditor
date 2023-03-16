@@ -1,28 +1,18 @@
 #!/usr/bin/env ruby
 
-def nth_prime(n)
-  prime_numbers = []
-  i = 2
-  
-  while prime_numbers.length < n
-    if is_prime?(i)
-      prime_numbers << i
-    end
-    i += 1
-  end
-  prime_numbers.last
-end
-
 def is_prime?(num)
-  (2...num).each do |divisor|
-    return false if num % divisor == 0
-  end
-
-  true
+    divisors = []
+    (2...num).each do |divisor|
+        divisors << divisor if num % divisor == 0
+    end 
+    divisors
 end
 
 puts "Please enter a number: "
 num = gets.chomp.to_i
-nth_prime_num = nth_prime(num)
 
-puts "The #{num}th prime number is #{nth_prime_num}."
+if is_prime?(num).empty?
+    puts "#{num} is a prime number!"
+else
+    puts "#{num} is not a prime number! Its divisors are: #{is_prime?(num).join(", ")}"
+end

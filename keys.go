@@ -7,6 +7,7 @@ type keyMap struct {
 	Down  key.Binding
 	Enter key.Binding
 	Save  key.Binding
+	Undo  key.Binding
 	Quit  key.Binding
 }
 
@@ -40,6 +41,10 @@ var keys = keyMap{
 	Save: key.NewBinding(
 		key.WithKeys("ctrl+s"),
 		key.WithHelp("ctrl+s", "save"),
+	),
+	Undo: key.NewBinding(
+		key.WithKeys("ctrl+z"),
+		key.WithHelp("ctrl+z", "undo"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("esc", "ctrl+c"),
