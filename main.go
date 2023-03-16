@@ -15,6 +15,7 @@ import (
 	"github.com/alecthomas/chroma/quick"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,6 +38,8 @@ var (
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("63")).
 			BorderTop(true).BorderBottom(true).BorderLeft(false).BorderRight(false)
+
+	program *tea.Program
 )
 
 func main() {
@@ -64,8 +67,8 @@ func main() {
 	client = openai.NewClient(token)
 
 	// start the tea program
-	p := tea.NewProgram(initialModel(os.Args[1], string(file)), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	program = tea.NewProgram(initialModel(os.Args[1], string(file)), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -78,6 +81,8 @@ type model struct {
 	keys keyMap
 	help help.Model
 
+	spinner   spinner.Model
+	loading   bool
 	textInput textinput.Model
 	code      viewport.Model
 	message   string
@@ -85,6 +90,11 @@ type model struct {
 
 	height int
 	width  int
+}
+
+type resultMsg struct {
+	content string
+	err     error
 }
 
 type file struct {
@@ -107,7 +117,7 @@ func (f *file) undo() {
 }
 
 func (f *file) push(content string) {
-	content = strings.TrimSpace(strings.Replace(content, "\t", "    ", -1))
+	content = strings.TrimSpace(strings.Replace(content, "\t", "    ", -1)) + "\n\n\n"
 	f.content = append([]string{content}, f.content...)
 	f.update()
 }
@@ -131,7 +141,12 @@ func initialModel(name, content string) model {
 	code := viewport.New(0, 0)
 	code.Style = codeStyle
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
 	return model{
+		spinner:   s,
 		textInput: ti,
 		help:      help.New(),
 		keys:      keys,
@@ -141,30 +156,49 @@ func initialModel(name, content string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.spinner.Tick)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case resultMsg:
+		if msg.err != nil {
+			m.message = msg.err.Error()
+		} else {
+			m.file.push(msg.content)
+		}
+		m.message = fmt.Sprintf("results are in! %d", len(msg.content))
+		m.loading = false
+		return m, nil
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keys.Up):
 			m.code.LineUp(1)
 		case key.Matches(msg, m.keys.Down):
 			m.code.LineDown(1)
+		case key.Matches(msg, m.keys.Top):
+			m.code.GotoTop()
+		case key.Matches(msg, m.keys.Bottom):
+			m.code.GotoBottom()
 		case key.Matches(msg, m.keys.Enter):
-			input := m.textInput.Value()
-			m.textInput.Reset()
-			response, err := client.CreateCompletion(context.Background(), openai.CompletionRequest{
-				Model:     "text-davinci-003",
-				Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, getLanguage(m.file.name), m.file.content),
-				MaxTokens: 2000,
-			})
-			if err != nil {
-				m.message = err.Error()
+			if !m.loading {
+				m.loading = true
+				go func(input string) {
+					response, err := client.CreateCompletion(context.Background(), openai.CompletionRequest{
+						Model:     "text-davinci-003",
+						Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, getLanguage(m.file.name), m.file.content),
+						MaxTokens: 2000,
+					})
+					if err != nil {
+						program.Send(resultMsg{err: err})
+					} else {
+						program.Send(resultMsg{content: response.Choices[0].Text})
+					}
+				}(m.textInput.Value())
+				m.textInput.Reset()
+				return m, nil
 			}
-			m.file.push(response.Choices[0].Text)
 
 		case key.Matches(msg, m.keys.Save):
 			content := strings.TrimSpace(m.file.content[0] + "\n")
@@ -207,13 +241,20 @@ func (m model) View() string {
 		lipgloss.Top,
 		lipgloss.JoinHorizontal(lipgloss.Left,
 			titleStyle.Width(len(m.file.name)).Render(m.file.name),
-			messageStyle.Width(m.width-len(m.file.name)).Render(m.message),
+			"\t",
+			m.statusView(),
 		),
-		"",
 		m.textInput.View(),
 		m.code.View(),
 		m.help.View(m.keys),
 	)
+}
+
+func (m model) statusView() string {
+	if m.loading {
+		return m.spinner.View() + messageStyle.Width(m.width-len(m.file.name)).Render("loading...")
+	}
+	return messageStyle.Width(m.width - len(m.file.name)).Render(m.message)
 }
 
 func getLanguage(filename string) string {

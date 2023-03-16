@@ -3,12 +3,14 @@ package main
 import "github.com/charmbracelet/bubbles/key"
 
 type keyMap struct {
-	Up    key.Binding
-	Down  key.Binding
-	Enter key.Binding
-	Save  key.Binding
-	Undo  key.Binding
-	Quit  key.Binding
+	Up     key.Binding
+	Down   key.Binding
+	Top    key.Binding
+	Bottom key.Binding
+	Enter  key.Binding
+	Save   key.Binding
+	Undo   key.Binding
+	Quit   key.Binding
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view. It's part
@@ -27,12 +29,20 @@ func (k keyMap) FullHelp() [][]key.Binding {
 
 var keys = keyMap{
 	Up: key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "move up"),
+		key.WithKeys("up"),
+		key.WithHelp("↑", "move up"),
 	),
 	Down: key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "move down"),
+		key.WithKeys("down"),
+		key.WithHelp("↓", "move down"),
+	),
+	Top: key.NewBinding(
+		key.WithKeys("shift+up"),
+		key.WithHelp("shift+↑", "move to top"),
+	),
+	Bottom: key.NewBinding(
+		key.WithKeys("shift+down"),
+		key.WithHelp("shift+↓", "move to bottom"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
