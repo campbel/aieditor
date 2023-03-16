@@ -1,18 +1,19 @@
 #!/usr/bin/env ruby
 
-def is_prime?(num)
-    divisors = []
-    (2...num).each do |divisor|
-        divisors << divisor if num % divisor == 0
-    end 
-    divisors
-end
-
 puts "Please enter a number: "
 num = gets.chomp.to_i
 
-if is_prime?(num).empty?
+def prime?(num)
+    (2..num/2).each do |i|
+        if num % i == 0
+            return false
+        end
+    end
+    true
+end
+
+if prime?(num)
     puts "#{num} is a prime number!"
 else
-    puts "#{num} is not a prime number! Its divisors are: #{is_prime?(num).join(", ")}"
+    puts "#{num} is not a prime number!"
 end

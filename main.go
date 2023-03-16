@@ -107,13 +107,14 @@ func (f *file) undo() {
 }
 
 func (f *file) push(content string) {
+	content = strings.TrimSpace(strings.Replace(content, "\t", "    ", -1))
 	f.content = append([]string{content}, f.content...)
 	f.update()
 }
 
 func (f *file) update() {
 	var b bytes.Buffer
-	err := quick.Highlight(&b, f.content[0], filepath.Ext(f.name), "terminal16m", "solorized-dark")
+	err := quick.Highlight(&b, f.content[0], getLanguage(f.name), "terminal16m", "dracula")
 	if err != nil {
 		f.display = f.content[0]
 	}
