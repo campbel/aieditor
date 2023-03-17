@@ -249,6 +249,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Undo):
 			m.file.undo()
 			m.updateContent()
+		case key.Matches(msg, m.keys.Load):
+			data, err := os.ReadFile(m.file.name)
+			if err != nil {
+				m.message = err.Error()
+			} else {
+				m.file.push(string(data))
+				m.updateContent()
+			}
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
