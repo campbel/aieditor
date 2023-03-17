@@ -1,8 +1,8 @@
-package main
+package app
 
 import "github.com/charmbracelet/bubbles/key"
 
-type keyMap struct {
+type KeyMap struct {
 	Up     key.Binding
 	Down   key.Binding
 	Top    key.Binding
@@ -15,19 +15,19 @@ type keyMap struct {
 
 // ShortHelp returns keybindings to be shown in the mini help view. It's part
 // of the key.Map interface.
-func (k keyMap) ShortHelp() []key.Binding {
+func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Up, k.Down, k.Enter, k.Save, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view. It's part of the
 // key.Map interface.
-func (k keyMap) FullHelp() [][]key.Binding {
+func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter, k.Save, k.Quit},
 	}
 }
 
-var keys = keyMap{
+var Keys = KeyMap{
 	Up: key.NewBinding(
 		key.WithKeys("up"),
 		key.WithHelp("↑", "move up"),
