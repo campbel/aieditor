@@ -4,14 +4,12 @@ package main
 // component library.
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/alecthomas/chroma/quick"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -19,15 +17,13 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/campbel/aieditor/app"
+	"github.com/campbel/aieditor/log"
 )
 
 var (
-	environment = os.Getenv("ENVIRONMENT")
-
 	client *openai.Client
 
 	borderColor = lipgloss.Color("63")
@@ -45,34 +41,12 @@ var (
 			PaddingRight(2)
 
 	program *tea.Program
-	logger  log.Logger
 )
 
 func main() {
 	// options parsig
 	if len(os.Args) != 2 {
 		log.Fatal("Please provide a file")
-	}
-
-	if environment == "development" {
-		var (
-			logFile *os.File
-		)
-		filename := "log.txt"
-		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			logFile, _ = os.Create(filename)
-		} else {
-			logFile, _ = os.OpenFile(filename, os.O_RDWR|os.O_APPEND, 0660)
-		}
-		logger = log.New(log.WithOutput(logFile), log.WithLevel(log.DebugLevel))
-	} else {
-		logger = log.New(log.WithLevel(log.InfoLevel))
-	}
-
-	// read the file
-	file, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
 	}
 
 	// initialize openai client
@@ -88,7 +62,7 @@ func main() {
 	client = openai.NewClient(token)
 
 	// start the tea program
-	program = tea.NewProgram(initialModel(os.Args[1], string(file)), tea.WithAltScreen())
+	program = tea.NewProgram(initialModel(os.Args[1]), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -106,7 +80,7 @@ type model struct {
 	lines viewport.Model
 
 	message string
-	file    *file
+	file    *app.FileBuffer
 
 	height int
 	width  int
@@ -117,41 +91,9 @@ type resultMsg struct {
 	err     error
 }
 
-type file struct {
-	name    string
-	content []string
-	display string
-}
+type fileMsg struct{}
 
-func newFile(name, content string) *file {
-	f := &file{name: name}
-	f.push(content)
-	return f
-}
-
-func (f *file) undo() {
-	if len(f.content) > 1 {
-		f.content = f.content[1:]
-	}
-	f.update()
-}
-
-func (f *file) push(content string) {
-	content = strings.TrimSpace(strings.Replace(content, "\t", "    ", -1))
-	f.content = append([]string{content}, f.content...)
-	f.update()
-}
-
-func (f *file) update() {
-	var b bytes.Buffer
-	err := quick.Highlight(&b, f.content[0], app.GetLanguage(f.name), "terminal16m", "dracula")
-	if err != nil {
-		f.display = f.content[0]
-	}
-	f.display = b.String()
-}
-
-func initialModel(name, content string) model {
+func initialModel(path string) model {
 	input := textinput.New()
 	input.Placeholder = "Fix this code!"
 	input.CharLimit = 256
@@ -177,11 +119,14 @@ func initialModel(name, content string) model {
 		keys:      app.Keys,
 		code:      code,
 		lines:     lines,
-		file:      newFile(name, content),
+		file:      app.NewFile(path),
 	}
 }
 
 func (m model) Init() tea.Cmd {
+	m.file.Watch(func() {
+		program.Send(fileMsg{})
+	})
 	return tea.Batch(textinput.Blink, m.spinner.Tick)
 }
 
@@ -192,11 +137,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.updateSizes()
 		m.updateContent()
+	case fileMsg:
+		m.updateContent()
 	case resultMsg:
 		if msg.err != nil {
 			m.message = msg.err.Error()
 		} else {
-			m.file.push(msg.content)
+			m.file.Set(msg.content)
 			m.updateContent()
 		}
 		m.loading = false
@@ -205,7 +152,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
-		logger.Debug("key pressed", "key", msg.String())
+		log.Debug("key pressed", "key", msg.String())
 		switch {
 		case key.Matches(msg, m.keys.Up):
 			m.code.LineUp(1)
@@ -223,10 +170,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.loading {
 				m.loading = true
 				go func(input string) {
-					logger.Debug("sending request to openai", "input", input)
+					log.Debug("sending request to openai", "input", input)
 					response, err := client.CreateCompletion(context.Background(), openai.CompletionRequest{
 						Model:     "text-davinci-003",
-						Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, app.GetLanguage(m.file.name), m.file.content),
+						Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, app.GetLanguage(m.file.Path()), m.file.Content()),
 						MaxTokens: 2000,
 					})
 					if err != nil {
@@ -239,24 +186,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.Save):
-			content := strings.TrimSpace(m.file.content[0] + "\n")
-			err := os.WriteFile(m.file.name, []byte(content), 0644)
+			err := m.file.Save()
 			if err != nil {
 				m.message = err.Error()
 			} else {
 				m.message = "Saved"
 			}
-		case key.Matches(msg, m.keys.Undo):
-			m.file.undo()
-			m.updateContent()
-		case key.Matches(msg, m.keys.Load):
-			data, err := os.ReadFile(m.file.name)
-			if err != nil {
-				m.message = err.Error()
-			} else {
-				m.file.push(string(data))
-				m.updateContent()
-			}
+		// case key.Matches(msg, m.keys.Undo):
+		// 	m.file.Undo()
+		// 	m.updateContent()
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
@@ -264,7 +202,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if !m.loading {
 		var cmd tea.Cmd
-		logger.Debug("updating text input")
+		log.Debug("updating text input")
 		m.textInput, cmd = m.textInput.Update(msg)
 		return m, cmd
 	}
@@ -272,18 +210,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSizes() {
-	logger.Debug("updating sizes", "height", m.height, "width", m.width)
+	log.Debug("updating sizes", "height", m.height, "width", m.width)
 	m.code.Height = m.height - 5
 	m.code.Width = m.width
 	m.lines.Height = m.height - 3
-	m.textInput.Width = m.width - 10 - len(m.file.name)
+	m.textInput.Width = m.width - 10 - len(m.file.Path())
 }
 
 func (m *model) updateContent() {
-	logger.Debug("updating content", "content", len(m.file.display))
-	m.code.SetContent(m.file.display)
+	log.Debug("updating content", "content", len(m.file.Display()))
+	m.code.SetContent(m.file.Display())
 	lines := ""
-	for i := 0; i < len(strings.Split(m.file.display, "\n")); i++ {
+	for i := 0; i < len(strings.Split(m.file.Display(), "\n")); i++ {
 		padding := ""
 		if i < 9 {
 			padding += " "
@@ -300,7 +238,6 @@ func (m *model) updateContent() {
 }
 
 func (m model) View() string {
-
 	headerStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
@@ -315,10 +252,10 @@ func (m model) View() string {
 
 	inputStyle := lipgloss.NewStyle().
 		MarginLeft(1).
-		Width(m.width - len(m.file.name) - 7)
+		Width(m.width - len(m.file.Path()) - 7)
 
 	filenameStyle := lipgloss.NewStyle().
-		Width(len(m.file.name) + 1).
+		Width(len(m.file.Path()) + 1).
 		Bold(true)
 
 	footerStyle := lipgloss.NewStyle().
@@ -336,7 +273,7 @@ func (m model) View() string {
 				spacerStyle.Render(""),
 				lipgloss.JoinHorizontal(lipgloss.Left,
 					inputStyle.Render(m.inputView()),
-					filenameStyle.Render(m.file.name),
+					filenameStyle.Render(m.file.Path()),
 				),
 			)),
 		lipgloss.JoinHorizontal(lipgloss.Left,

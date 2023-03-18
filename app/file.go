@@ -2,13 +2,15 @@ package app
 
 import (
 	"bytes"
-	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/alecthomas/chroma/quick"
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/campbel/aieditor/log"
 )
 
 type FileBuffer struct {
@@ -54,33 +56,40 @@ func (f *FileBuffer) Set(content string) {
 	f.display = b.String()
 }
 
-func (f *FileBuffer) Watch() error {
+func (f *FileBuffer) Save() error {
+	return os.WriteFile(f.path, []byte(f.Content()), 0644)
+}
+
+func (f *FileBuffer) Watch(fn func()) error {
+
+	dir := filepath.Dir(f.path)
+	log.Debug("watching", "dir", dir)
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer watcher.Close()
 
 	// Start listening for events.
 	go func() {
 		for {
 			select {
 			case event, ok := <-watcher.Events:
+				log.Debug("watch event", "event", event, "ok", ok)
 				if !ok {
 					return
 				}
-				if event.Has(fsnotify.Write) {
+				if event.Name == f.path && event.Has(fsnotify.Write) {
 					f.load()
+					fn()
 				}
 			case err, ok := <-watcher.Errors:
-				if !ok {
-					panic(err)
-				}
+				log.Debug("watch error", "error", err, "ok", ok)
 			}
 		}
 	}()
 
-	return watcher.Add(f.path)
+	return watcher.Add(dir)
 }
 
 func (f *FileBuffer) load() error {
