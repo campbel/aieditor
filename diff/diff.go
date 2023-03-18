@@ -19,8 +19,16 @@ func Diff(a, b string) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("diff", "--color=always", "-u", afilePath, bFilePath)
-	out, _ := cmd.Output()
+	if useDiffSoFancy() {
+		cmdDiff := exec.Command("diff", "-u", afilePath, bFilePath)
+		cmdPretty := exec.Command("diff-so-fancy")
+		cmdPretty.Stdin, _ = cmdDiff.StdoutPipe()
+		cmdDiff.Start()
+		out, _ := cmdPretty.Output()
+		return string(out), nil
+	}
+	cmdDiff := exec.Command("diff", "--color=always", "-u", afilePath, bFilePath)
+	out, _ := cmdDiff.Output()
 	return string(out), nil
 }
 
@@ -38,4 +46,9 @@ func randString() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
+}
+
+func useDiffSoFancy() bool {
+	_, err := exec.LookPath("diff-so-fancy")
+	return err == nil
 }
