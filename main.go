@@ -20,6 +20,7 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/campbel/aieditor/app"
+	"github.com/campbel/aieditor/diff"
 	"github.com/campbel/aieditor/log"
 )
 
@@ -93,7 +94,7 @@ type model struct {
 	message     string
 	file        *app.FileBuffer
 	input       string
-	changes     []string
+	changes     []change
 	changeIndex int
 
 	height int
@@ -101,9 +102,22 @@ type model struct {
 }
 
 type resultMsg struct {
-	input   string
-	content []string
-	err     error
+	input       string
+	suggestions []change
+	err         error
+}
+
+type change struct {
+	raw  string
+	diff string
+}
+
+func newChange(raw, content string) change {
+	d, _ := diff.Diff(content, raw)
+	return change{
+		raw:  raw,
+		diff: d,
+	}
 }
 
 type fileMsg struct{}
@@ -160,7 +174,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = msg.err.Error()
 		} else {
 			m.input = msg.input
-			m.changes = msg.content
+			m.changes = msg.suggestions
 			m.state = stateComparing
 			m.updateContent()
 			return m, nil
@@ -215,7 +229,7 @@ func (m *model) updateCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateContent()
 		return m, nil
 	case key.Matches(msg, m.keysComparing.Accept):
-		m.file.Set(m.changes[m.changeIndex])
+		m.file.Set(m.changes[m.changeIndex].raw)
 		m.state = stateViewing
 		m.changes = nil
 		m.input = ""
@@ -312,11 +326,11 @@ func (m *model) fetchSuggestions(input string) {
 	if err != nil {
 		program.Send(resultMsg{err: err})
 	} else {
-		changes := []string{}
+		changes := []change{}
 		for _, choice := range response.Choices {
-			changes = append(changes, choice.Text)
+			changes = append(changes, newChange(choice.Text, m.file.Content()))
 		}
-		program.Send(resultMsg{input: input, content: changes})
+		program.Send(resultMsg{input: input, suggestions: changes})
 	}
 }
 
@@ -332,7 +346,11 @@ func (m *model) updateContent() {
 	log.Debug("updating content")
 	content := m.file.Display()
 	if m.state == stateComparing {
-		content = app.Highlight(m.changes[m.changeIndex], app.GetLanguage(m.file.Path()))
+		if m.changes[m.changeIndex].diff != "" {
+			content = m.changes[m.changeIndex].diff
+		} else {
+			content = app.Highlight(m.changes[m.changeIndex].raw, app.GetLanguage(m.file.Path()))
+		}
 	}
 	m.code.SetContent(content)
 	lines := ""
