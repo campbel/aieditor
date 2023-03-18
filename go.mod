@@ -8,7 +8,9 @@ require (
 	github.com/charmbracelet/bubbletea v0.23.1
 	github.com/charmbracelet/lipgloss v0.7.1
 	github.com/charmbracelet/log v0.1.2
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/sashabaranov/go-openai v1.5.2
+	github.com/sergi/go-diff v1.3.1
 )
 
 require (
