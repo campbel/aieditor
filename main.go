@@ -28,8 +28,7 @@ var (
 
 	borderColor = lipgloss.Color("63")
 
-	codeStyle = lipgloss.NewStyle().
-			PaddingLeft(1)
+	codeStyle = lipgloss.NewStyle()
 
 	linesStyle = lipgloss.NewStyle().
 			Width(5).
@@ -68,26 +67,42 @@ func main() {
 	}
 }
 
-type model struct {
-	keys app.KeyMap
-	help help.Model
+type state string
 
-	spinner   spinner.Model
-	loading   bool
+const (
+	stateViewing   state = "viewing"
+	stateInput     state = "input"
+	stateLoading   state = "loading"
+	stateComparing state = "comparing"
+)
+
+type model struct {
+	state state
+
+	keysDefault   app.KeyMap
+	keysComparing app.CompareKeysMap
+	help          help.Model
+
+	spinner spinner.Model
+
 	textInput textinput.Model
 
 	code  viewport.Model
 	lines viewport.Model
 
-	message string
-	file    *app.FileBuffer
+	message     string
+	file        *app.FileBuffer
+	input       string
+	changes     []string
+	changeIndex int
 
 	height int
 	width  int
 }
 
 type resultMsg struct {
-	content string
+	input   string
+	content []string
 	err     error
 }
 
@@ -100,7 +115,6 @@ func initialModel(path string) model {
 	input.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	input.Prompt = "➜ "
 	input.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	input.Focus()
 
 	code := viewport.New(0, 0)
 	code.Style = codeStyle
@@ -113,13 +127,15 @@ func initialModel(path string) model {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	return model{
-		spinner:   s,
-		textInput: input,
-		help:      help.New(),
-		keys:      app.Keys,
-		code:      code,
-		lines:     lines,
-		file:      app.NewFile(path),
+		state:         stateViewing,
+		spinner:       s,
+		textInput:     input,
+		help:          help.New(),
+		keysDefault:   app.Keys,
+		keysComparing: app.CompareKeys,
+		code:          code,
+		lines:         lines,
+		file:          app.NewFile(path),
 	}
 }
 
@@ -143,70 +159,165 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.message = msg.err.Error()
 		} else {
-			m.file.Set(msg.content)
+			m.input = msg.input
+			m.changes = msg.content
+			m.state = stateComparing
 			m.updateContent()
+			return m, nil
 		}
-		m.loading = false
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
 		log.Debug("key pressed", "key", msg.String())
-		switch {
-		case key.Matches(msg, m.keys.Up):
-			m.code.LineUp(1)
-			m.lines.LineUp(1)
-		case key.Matches(msg, m.keys.Down):
-			m.code.LineDown(1)
-			m.lines.LineDown(1)
-		case key.Matches(msg, m.keys.Top):
-			m.code.GotoTop()
-			m.lines.GotoTop()
-		case key.Matches(msg, m.keys.Bottom):
-			m.code.GotoBottom()
-			m.lines.GotoBottom()
-		case key.Matches(msg, m.keys.Enter):
-			if !m.loading {
-				m.loading = true
-				go func(input string) {
-					log.Debug("sending request to openai", "input", input)
-					response, err := client.CreateCompletion(context.Background(), openai.CompletionRequest{
-						Model:     "text-davinci-003",
-						Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, app.GetLanguage(m.file.Path()), m.file.Content()),
-						MaxTokens: 2000,
-					})
-					if err != nil {
-						program.Send(resultMsg{err: err})
-					} else {
-						program.Send(resultMsg{content: response.Choices[0].Text})
-					}
-				}(m.textInput.Value())
-				m.textInput.Reset()
-			}
-			return m, nil
-		case key.Matches(msg, m.keys.Save):
-			err := m.file.Save()
-			if err != nil {
-				m.message = err.Error()
-			} else {
-				m.message = "Saved"
-			}
-		// case key.Matches(msg, m.keys.Undo):
-		// 	m.file.Undo()
-		// 	m.updateContent()
-		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
+		switch m.state {
+		case stateComparing:
+			return m.updateCompareKeys(msg)
+		default:
+			return m.updateDefaultKeys(msg)
 		}
 	}
-
-	if !m.loading {
+	if m.state == stateInput {
 		var cmd tea.Cmd
-		log.Debug("updating text input")
 		m.textInput, cmd = m.textInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *model) updateCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keysDefault.Up):
+		m.code.LineUp(1)
+		m.lines.LineUp(1)
+	case key.Matches(msg, m.keysDefault.Down):
+		m.code.LineDown(1)
+		m.lines.LineDown(1)
+	case key.Matches(msg, m.keysDefault.Top):
+		m.code.GotoTop()
+		m.lines.GotoTop()
+	case key.Matches(msg, m.keysDefault.Bottom):
+		m.code.GotoBottom()
+		m.lines.GotoBottom()
+	case key.Matches(msg, m.keysComparing.Next):
+		m.changeIndex++
+		if m.changeIndex >= len(m.changes) {
+			m.changeIndex = 0
+		}
+		m.updateContent()
+		return m, nil
+	case key.Matches(msg, m.keysComparing.Prev):
+		m.changeIndex--
+		if m.changeIndex < 0 {
+			m.changeIndex = len(m.changes) - 1
+		}
+		m.updateContent()
+		return m, nil
+	case key.Matches(msg, m.keysComparing.Accept):
+		m.file.Set(m.changes[m.changeIndex])
+		m.state = stateViewing
+		m.changes = nil
+		m.input = ""
+		m.changeIndex = 0
+		m.updateContent()
+		return m, nil
+	case key.Matches(msg, m.keysComparing.Reject):
+		// remove the element at m.changeIndex, and fix change index if its out of bounds
+		m.changes = append(m.changes[:m.changeIndex], m.changes[m.changeIndex+1:]...)
+		if m.changeIndex >= len(m.changes) {
+			m.changeIndex = len(m.changes) - 1
+		}
+		if len(m.changes) == 0 {
+			m.state = stateViewing
+			m.changes = nil
+			m.input = ""
+			m.changeIndex = 0
+		}
+		m.updateContent()
+		return m, nil
+	case key.Matches(msg, m.keysComparing.Retry):
+		m.state = stateLoading
+		m.changes = nil
+		m.input = ""
+		m.changeIndex = 0
+		m.updateContent()
+		go m.fetchSuggestions(m.input)
+	case key.Matches(msg, m.keysComparing.Exit):
+		m.state = stateViewing
+		m.changes = nil
+		m.input = ""
+		m.changeIndex = 0
+		m.updateContent()
+	}
+	return m, nil
+}
+
+func (m *model) updateDefaultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keysDefault.Focus):
+		if m.state == stateViewing {
+			m.textInput.Focus()
+			m.state = stateInput
+			return m, nil
+		}
+	case key.Matches(msg, m.keysDefault.Blur):
+		if m.state == stateInput {
+			m.textInput.Blur()
+			m.state = stateViewing
+			return m, nil
+		}
+	case key.Matches(msg, m.keysDefault.Up):
+		m.code.LineUp(1)
+		m.lines.LineUp(1)
+	case key.Matches(msg, m.keysDefault.Down):
+		m.code.LineDown(1)
+		m.lines.LineDown(1)
+	case key.Matches(msg, m.keysDefault.Top):
+		m.code.GotoTop()
+		m.lines.GotoTop()
+	case key.Matches(msg, m.keysDefault.Bottom):
+		m.code.GotoBottom()
+		m.lines.GotoBottom()
+	case key.Matches(msg, m.keysDefault.Enter):
+		if m.state != stateLoading {
+			m.state = stateLoading
+			go m.fetchSuggestions(m.textInput.Value())
+			m.textInput.Reset()
+		}
+		return m, nil
+	case key.Matches(msg, m.keysDefault.Save):
+		err := m.file.Save()
+		if err != nil {
+			m.message = err.Error()
+		} else {
+			m.message = "Saved"
+		}
+	case key.Matches(msg, m.keysDefault.Quit):
+		return m, tea.Quit
+	}
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m *model) fetchSuggestions(input string) {
+	log.Debug("sending request to openai", "input", input)
+	response, err := client.CreateCompletion(context.Background(), openai.CompletionRequest{
+		Model:     "text-davinci-003",
+		Prompt:    fmt.Sprintf("Modify the code below in the following way (don't include the code block in output): %s\n\n```%s\n%s\n```\n", input, app.GetLanguage(m.file.Path()), m.file.Content()),
+		MaxTokens: 2000,
+		N:         3,
+	})
+	if err != nil {
+		program.Send(resultMsg{err: err})
+	} else {
+		changes := []string{}
+		for _, choice := range response.Choices {
+			changes = append(changes, choice.Text)
+		}
+		program.Send(resultMsg{input: input, content: changes})
+	}
 }
 
 func (m *model) updateSizes() {
@@ -218,10 +329,14 @@ func (m *model) updateSizes() {
 }
 
 func (m *model) updateContent() {
-	log.Debug("updating content", "content", len(m.file.Display()))
-	m.code.SetContent(m.file.Display())
+	log.Debug("updating content")
+	content := m.file.Display()
+	if m.state == stateComparing {
+		content = app.Highlight(m.changes[m.changeIndex], app.GetLanguage(m.file.Path()))
+	}
+	m.code.SetContent(content)
 	lines := ""
-	for i := 0; i < len(strings.Split(m.file.Display(), "\n")); i++ {
+	for i := 0; i < len(strings.Split(content, "\n")); i++ {
 		padding := ""
 		if i < 9 {
 			padding += " "
@@ -243,18 +358,11 @@ func (m model) View() string {
 		BorderForeground(borderColor).
 		BorderBottom(true)
 
-	spacerStyle := lipgloss.NewStyle().
-		Width(5).
-		Height(1).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderRight(true)
-
 	inputStyle := lipgloss.NewStyle().
-		MarginLeft(1).
-		Width(m.width - len(m.file.Path()) - 7)
+		Width(m.width - len(m.file.Path()) - 1)
 
 	filenameStyle := lipgloss.NewStyle().
+		Align(lipgloss.Right).
 		Width(len(m.file.Path()) + 1).
 		Bold(true)
 
@@ -267,22 +375,39 @@ func (m model) View() string {
 		Width(m.width).
 		Foreground(lipgloss.Color("#0000ff"))
 
+	if m.state == stateComparing {
+		return lipgloss.JoinVertical(lipgloss.Top,
+			headerStyle.Render(
+				lipgloss.JoinHorizontal(lipgloss.Left,
+					lipgloss.JoinHorizontal(lipgloss.Left,
+						inputStyle.Foreground(lipgloss.Color("205")).Render(
+							fmt.Sprintf("AI suggested change %d/%d", m.changeIndex+1, len(m.changes)),
+						),
+						filenameStyle.Render(m.file.Path()),
+					),
+				)),
+			m.code.View(),
+			footerStyle.Width(m.width).Render(
+				lipgloss.JoinVertical(lipgloss.Top,
+					m.helpView(),
+					notificationStyle.Render(m.message),
+				),
+			),
+		)
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Top,
 		headerStyle.Render(
 			lipgloss.JoinHorizontal(lipgloss.Left,
-				spacerStyle.Render(""),
 				lipgloss.JoinHorizontal(lipgloss.Left,
 					inputStyle.Render(m.inputView()),
 					filenameStyle.Render(m.file.Path()),
 				),
 			)),
-		lipgloss.JoinHorizontal(lipgloss.Left,
-			m.lines.View(),
-			m.code.View(),
-		),
+		m.code.View(),
 		footerStyle.Width(m.width).Render(
 			lipgloss.JoinVertical(lipgloss.Top,
-				m.help.View(m.keys),
+				m.helpView(),
 				notificationStyle.Render(m.message),
 			),
 		),
@@ -290,8 +415,20 @@ func (m model) View() string {
 }
 
 func (m *model) inputView() string {
-	if m.loading {
+	if m.state == stateLoading {
 		return m.spinner.View() + " fetching code completions..."
 	}
-	return m.textInput.View()
+	if m.state == stateInput {
+		return m.textInput.View()
+	}
+	return ""
+}
+
+func (m *model) helpView() string {
+	switch m.state {
+	case stateComparing:
+		return m.help.View(m.keysComparing)
+	default:
+		return m.help.View(m.keysDefault)
+	}
 }
