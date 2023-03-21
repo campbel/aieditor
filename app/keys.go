@@ -60,20 +60,20 @@ var Keys = KeyMap{
 		key.WithHelp("esc", "cancel input"),
 	),
 	Save: key.NewBinding(
-		key.WithKeys("ctrl+s"),
-		key.WithHelp("ctrl+s", "save"),
+		key.WithKeys("s"),
+		key.WithHelp("s", "save"),
 	),
 	Load: key.NewBinding(
-		key.WithKeys("ctrl+l"),
-		key.WithHelp("ctrl+l", "load"),
+		key.WithKeys("l"),
+		key.WithHelp("l", "load"),
 	),
 	Undo: key.NewBinding(
-		key.WithKeys("ctrl+z"),
-		key.WithHelp("ctrl+z", "undo"),
+		key.WithKeys("z"),
+		key.WithHelp("z", "undo"),
 	),
 	Quit: key.NewBinding(
-		key.WithKeys("ctrl+c"),
-		key.WithHelp("ctrl+c", "exit"),
+		key.WithKeys("ctrl+c", "q"),
+		key.WithHelp("q", "exit"),
 	),
 }
 
