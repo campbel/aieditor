@@ -1,4 +1,4 @@
-Set FontSize 14
+Set FontSize 18
 Set Height 720
 Set Width 1280
 Sleep 1s
