@@ -1,6 +1,6 @@
 module github.com/campbel/aieditor
 
-go 1.19
+go 1.20
 
 require (
 	github.com/alecthomas/chroma v0.10.0
@@ -10,7 +10,6 @@ require (
 	github.com/charmbracelet/log v0.1.2
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/sashabaranov/go-openai v1.5.2
-	github.com/sergi/go-diff v1.3.1
 )
 
 require (

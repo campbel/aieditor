@@ -2,11 +2,11 @@ Set FontSize 14
 Set Height 720
 Set Width 1280
 Sleep 1s
-Type "go run . demo/main.go"
+Type "aieditor demo/main.go"
 Enter
 Sleep 5s
 Type "/"
-Type "ListenAndServe returns an error, handle it."
+Type "add an auth middleware that checks the username and password is fruitloops"
 Sleep 3s
 Enter
 Sleep 25s
